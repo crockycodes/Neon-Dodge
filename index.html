@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Neon Dodge — a fast, glowing browser dodging game. Survive the falling neon as long as you can.">
+
+    <title>Neon Dodge</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <nav class="site-nav">
+        <span class="logo">NEON<span class="logo-accent">DODGE</span></span>
+        <div class="nav-right">
+            <button id="musicToggle" class="music-btn">🔈 Music: Off</button>
+            <a class="repo-link" href="https://github.com/crockycodes" target="_blank" rel="noopener">View on GitHub →</a>
+        </div>
+    </nav>
+
+    <div class="welcome-toast">
+        👋 Welcome! Built by <strong>Saurav</strong> ·
+        <a href="https://github.com/crockycodes" target="_blank" rel="noopener">@crockycodes</a>
+    </div>
+
+    <header class="hero">
+        <div class="horizon">
+            <div class="sun"></div>
+            <div class="grid"></div>
+        </div>
+
+        <div class="hero-content">
+            <h1 class="hero-title">NEON DODGE</h1>
+            <p class="hero-tagline">A glowing dot. A city of falling neon. How long can you last?</p>
+            <a href="#play" class="play-btn">▶ PLAY NOW</a>
+        </div>
+    </header>
+
+    <main id="play" class="play-section">
+
+        <div class="game-wrapper" id="gameWrapper">
+            <div id="game">
+
+                <div id="score">Score: 0</div>
+                <div id="highscore">Best: 0</div>
+
+                <div id="player"></div>
+
+                <div id="gameOverOverlay">
+                    <div id="gameOverTitle">GAME OVER</div>
+                    <div id="gameOverScore"></div>
+                    <div id="gameOverHint">
+                        <span class="hint-keyboard">Press SPACE to restart</span>
+                        <span class="hint-touch">Tap anywhere to restart</span>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        <div class="how-to-play">
+            <div class="how-to-play-item hint-keyboard"><span class="key">←</span><span class="key">→</span> Move</div>
+            <div class="how-to-play-item hint-keyboard"><span class="key key-wide">SPACE</span> Restart</div>
+            <div class="how-to-play-item hint-touch">👆 Drag left/right to move · tap to restart</div>
+        </div>
+
+    </main>
+
+    <footer class="site-footer">
+        <p>Built with HTML, CSS &amp; JavaScript — no game engine, no dependencies.</p>
+        <p class="footer-credit">Made by Saurav — <a href="https://github.com/crockycodes" target="_blank" rel="noopener">@crockycodes</a></p>
+    </footer>
+
+    <script src="game.js"></script>
+</body>
+</html>
