@@ -554,3 +554,91 @@ body {
         text-align: center;
     }
 }
+
+
+/* ===============================
+   COMBO BADGE
+   =============================== */
+
+#combo {
+    position: absolute;
+    top: 42px;
+    left: 15px;
+    font-family: "Orbitron", sans-serif;
+    font-size: 13px;
+    color: var(--sun-yellow);
+    text-shadow: 0 0 8px var(--sun-yellow);
+    z-index: 10;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+#combo.visible {
+    opacity: 1;
+}
+
+#combo.pulse {
+    animation: comboPulse 0.35s ease;
+}
+
+@keyframes comboPulse {
+    0%   { transform: scale(1); }
+    40%  { transform: scale(1.4); }
+    100% { transform: scale(1); }
+}
+
+
+/* ===============================
+   POWER-UPS
+   =============================== */
+
+.powerup {
+    position: absolute;
+    width: 30px;
+    height: 30px;
+    border: 2px solid;
+    border-radius: 50%;
+    background: rgba(10, 1, 24, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    z-index: 3;
+    animation: powerupFloat 1.2s ease-in-out infinite;
+}
+
+@keyframes powerupFloat {
+    0%, 100% { filter: brightness(1); }
+    50%      { filter: brightness(1.4); }
+}
+
+
+/* ===============================
+   SHIELD (on player)
+   =============================== */
+
+#player.shielded {
+    box-shadow:
+        0 0 10px var(--grid-cyan),
+        0 0 20px var(--grid-cyan),
+        0 0 0 4px rgba(5, 217, 232, 0.5);
+}
+
+
+/* ===============================
+   SLOW-MO OVERLAY
+   =============================== */
+
+#slowmoOverlay {
+    position: absolute;
+    inset: 0;
+    background: rgba(255, 222, 89, 0.08);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    z-index: 8;
+}
+
+#slowmoOverlay.active {
+    opacity: 1;
+}

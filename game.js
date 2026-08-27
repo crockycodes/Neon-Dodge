@@ -32,6 +32,17 @@ highScoreDisplay.textContent = "Best: " + highScore;
 let startTime = Date.now();
 let difficulty = 1;
 
+// Combo: consecutive dodges raise your score multiplier
+let comboCount = 0;
+let comboMultiplier = 1;
+const comboDisplay = document.getElementById("combo");
+
+// Power-up state
+let hasShield = false;
+let slowMoFactor = 1; // 1 = normal speed, 0.5 = slow-mo active
+let slowMoTimeoutId = null;
+const slowmoOverlay = document.getElementById("slowmoOverlay");
+
 
 // ===============================
 // SOUND (Web Audio API - no files needed)
@@ -74,10 +85,26 @@ function playCrashSound() {
     playTone(120, 0.4, "sawtooth");
 }
 
+function playPowerUpSound() {
+    playTone(660, 0.12, "triangle");
+    setTimeout(function() { playTone(990, 0.15, "triangle"); }, 90);
+}
+
+function playShieldBreakSound() {
+    playTone(440, 0.2, "square");
+}
+
+function playComboSound() {
+    playTone(1320, 0.1, "sine");
+}
+
 
 // ===============================
-// BACKGROUND MUSIC (procedural chill pad loop)
+// BACKGROUND MUSIC (procedural, multiple tracks)
 // ===============================
+// Every track is generated live with the Web Audio API - no audio files
+// to source or host. Clicking the music button cycles: Off -> Chill ->
+// Synthwave -> Ambient -> Off, each with its own chords, tempo, and tone.
 
 let musicGainNode = null;
 let musicFilterNode = null;
@@ -85,12 +112,46 @@ let musicPlaying = false;
 let musicTimeoutId = null;
 let chordIndex = 0;
 
-// Soft chord progression (Am7 - Fmaj7 - Cmaj7 - G) for a chill, ambient feel
-const chordProgression = [
-    [220.00, 261.63, 329.63, 392.00],
-    [174.61, 220.00, 261.63, 349.23],
-    [130.81, 164.81, 196.00, 261.63],
-    [196.00, 246.94, 293.66, 392.00]
+// currentTrackIndex: -1 means off, otherwise an index into musicTracks
+let currentTrackIndex = -1;
+
+const musicTracks = [
+    {
+        name: "Chill",
+        icon: "🎵",
+        chordDuration: 4.5,
+        filterFreq: 1000,
+        chords: [
+            [220.00, 261.63, 329.63, 392.00], // Am7
+            [174.61, 220.00, 261.63, 349.23], // Fmaj7
+            [130.81, 164.81, 196.00, 261.63], // Cmaj7
+            [196.00, 246.94, 293.66, 392.00]  // G
+        ]
+    },
+    {
+        name: "Synthwave",
+        icon: "🌆",
+        chordDuration: 2.6,
+        filterFreq: 2200,
+        chords: [
+            [164.81, 196.00, 246.94, 329.63], // Em
+            [130.81, 164.81, 196.00, 261.63], // C
+            [196.00, 246.94, 293.66, 392.00], // G
+            [146.83, 185.00, 220.00, 293.66]  // D
+        ]
+    },
+    {
+        name: "Ambient",
+        icon: "🌌",
+        chordDuration: 7,
+        filterFreq: 550,
+        chords: [
+            [110.00, 146.83, 220.00], // A
+            [98.00, 130.81, 196.00],  // G
+            [87.31, 130.81, 174.61],  // F
+            [110.00, 146.83, 220.00]  // A
+        ]
+    }
 ];
 
 function setupMusicBus() {
@@ -134,18 +195,18 @@ function playChordPad(freqs, duration) {
 
 function musicLoop() {
 
-    if (!musicPlaying) return;
+    if (!musicPlaying || currentTrackIndex === -1) return;
 
-    const chordDuration = 4.5;
+    const track = musicTracks[currentTrackIndex];
 
-    playChordPad(chordProgression[chordIndex], chordDuration);
-    chordIndex = (chordIndex + 1) % chordProgression.length;
+    playChordPad(track.chords[chordIndex], track.chordDuration);
+    chordIndex = (chordIndex + 1) % track.chords.length;
 
     // Slight overlap between chords keeps it smooth instead of choppy
-    musicTimeoutId = setTimeout(musicLoop, chordDuration * 1000 * 0.85);
+    musicTimeoutId = setTimeout(musicLoop, track.chordDuration * 1000 * 0.85);
 }
 
-function toggleMusic() {
+function cycleMusic() {
 
     const ctx = getAudioCtx();
 
@@ -153,21 +214,44 @@ function toggleMusic() {
         setupMusicBus();
     }
 
-    musicPlaying = !musicPlaying;
+    clearTimeout(musicTimeoutId);
+
+    currentTrackIndex++;
+    if (currentTrackIndex >= musicTracks.length) {
+        currentTrackIndex = -1;
+    }
 
     musicGainNode.gain.cancelScheduledValues(ctx.currentTime);
 
-    if (musicPlaying) {
-        musicGainNode.gain.linearRampToValueAtTime(1, ctx.currentTime + 1.2);
-        musicLoop();
+    if (currentTrackIndex === -1) {
+
+        musicPlaying = false;
+        musicGainNode.gain.linearRampToValueAtTime(0, ctx.currentTime + 1);
+
     } else {
-        musicGainNode.gain.linearRampToValueAtTime(0, ctx.currentTime + 1.2);
-        clearTimeout(musicTimeoutId);
+
+        musicPlaying = true;
+        chordIndex = 0;
+        musicFilterNode.frequency.setTargetAtTime(
+            musicTracks[currentTrackIndex].filterFreq, ctx.currentTime, 0.3
+        );
+        musicGainNode.gain.linearRampToValueAtTime(1, ctx.currentTime + 1);
+        musicLoop();
     }
 
+    updateMusicButtonLabel();
+}
+
+function updateMusicButtonLabel() {
+
     const musicButton = document.getElementById("musicToggle");
-    if (musicButton) {
-        musicButton.textContent = musicPlaying ? "🔊 Music: On" : "🔈 Music: Off";
+    if (!musicButton) return;
+
+    if (currentTrackIndex === -1) {
+        musicButton.textContent = "🔈 Music: Off";
+    } else {
+        const track = musicTracks[currentTrackIndex];
+        musicButton.textContent = track.icon + " " + track.name;
     }
 }
 
@@ -175,7 +259,7 @@ function toggleMusic() {
 const musicToggleButton = document.getElementById("musicToggle");
 
 if (musicToggleButton) {
-    musicToggleButton.addEventListener("click", toggleMusic);
+    musicToggleButton.addEventListener("click", cycleMusic);
 }
 
 
@@ -343,10 +427,172 @@ function dodgeEnemy(enemy) {
 
     placeEnemy(enemy);
 
-    score++;
+    comboCount++;
+
+    const newMultiplier = Math.min(1 + Math.floor(comboCount / 5), 5);
+
+    if (newMultiplier > comboMultiplier) {
+        comboMultiplier = newMultiplier;
+        playComboSound();
+        pulseCombo();
+    }
+
+    score += comboMultiplier;
     scoreDisplay.textContent = "Score: " + score;
 
+    updateComboDisplay();
+
     playDodgeSound();
+}
+
+
+function updateComboDisplay() {
+
+    if (comboMultiplier > 1) {
+        comboDisplay.textContent = "x" + comboMultiplier + " combo";
+        comboDisplay.classList.add("visible");
+    } else {
+        comboDisplay.classList.remove("visible");
+    }
+}
+
+
+function pulseCombo() {
+
+    comboDisplay.classList.remove("pulse");
+    void comboDisplay.offsetWidth; // restart the CSS animation
+    comboDisplay.classList.add("pulse");
+}
+
+
+function resetCombo() {
+
+    comboCount = 0;
+    comboMultiplier = 1;
+    updateComboDisplay();
+}
+
+
+// ===============================
+// POWER-UPS
+// ===============================
+
+const powerUps = [];
+
+const powerUpTypes = {
+    shield: { symbol: "🛡", color: "#05d9e8" },
+    slowmo: { symbol: "⏱", color: "#ffde59" }
+};
+
+function spawnPowerUp() {
+
+    if (!gameRunning) return;
+
+    const types = Object.keys(powerUpTypes);
+    const type = types[Math.floor(Math.random() * types.length)];
+    const info = powerUpTypes[type];
+
+    const el = document.createElement("div");
+    el.className = "powerup";
+    el.textContent = info.symbol;
+    el.style.borderColor = info.color;
+    el.style.boxShadow = "0 0 10px " + info.color + ", 0 0 20px " + info.color;
+
+    game.appendChild(el);
+
+    powerUps.push({
+        element: el,
+        type: type,
+        x: Math.random() * 370,
+        y: -30,
+        speed: 2.5
+    });
+}
+
+function schedulePowerUp() {
+
+    const delay = 7000 + Math.random() * 6000; // every 7-13 seconds
+
+    setTimeout(function() {
+        spawnPowerUp();
+        schedulePowerUp();
+    }, delay);
+}
+
+function removePowerUp(powerUp) {
+
+    powerUp.element.remove();
+
+    const index = powerUps.indexOf(powerUp);
+    if (index !== -1) {
+        powerUps.splice(index, 1);
+    }
+}
+
+function checkPowerUpCollision(powerUp) {
+
+    const playerTop = 550;
+    const playerBottom = 580;
+
+    const puLeft = powerUp.x;
+    const puRight = powerUp.x + 30;
+    const puTop = powerUp.y;
+    const puBottom = powerUp.y + 30;
+
+    return (
+        playerX < puRight &&
+        playerX + 30 > puLeft &&
+        playerTop < puBottom &&
+        playerBottom > puTop
+    );
+}
+
+function collectPowerUp(powerUp) {
+
+    playPowerUpSound();
+
+    if (powerUp.type === "shield") {
+        activateShield();
+    } else if (powerUp.type === "slowmo") {
+        activateSlowMo();
+    }
+
+    removePowerUp(powerUp);
+}
+
+function activateShield() {
+
+    hasShield = true;
+    player.classList.add("shielded");
+}
+
+function consumeShield(enemy) {
+
+    hasShield = false;
+    player.classList.remove("shielded");
+
+    playShieldBreakSound();
+    triggerShake();
+    spawnParticles(playerX + 15, 565);
+
+    resetCombo();
+
+    // The enemy that hit the shield gets sent back to the top,
+    // rather than ending the run
+    placeEnemy(enemy);
+}
+
+function activateSlowMo() {
+
+    slowMoFactor = 0.5;
+    slowmoOverlay.classList.add("active");
+
+    // Stacks/refreshes duration if picked up again while already active
+    clearTimeout(slowMoTimeoutId);
+    slowMoTimeoutId = setTimeout(function() {
+        slowMoFactor = 1;
+        slowmoOverlay.classList.remove("active");
+    }, 5000);
 }
 
 
@@ -452,7 +698,11 @@ function checkCollision(enemy) {
         playerTop < enemyBottom &&
         playerBottom > enemyTop
     ) {
-        triggerGameOver();
+        if (hasShield) {
+            consumeShield(enemy);
+        } else {
+            triggerGameOver();
+        }
     }
 }
 
@@ -487,6 +737,20 @@ function restartGame() {
     score = 0;
     scoreDisplay.textContent = "Score: 0";
 
+    resetCombo();
+
+    hasShield = false;
+    player.classList.remove("shielded");
+
+    slowMoFactor = 1;
+    slowmoOverlay.classList.remove("active");
+    clearTimeout(slowMoTimeoutId);
+
+    powerUps.forEach(function(powerUp) {
+        powerUp.element.remove();
+    });
+    powerUps.length = 0;
+
     playerX = 185;
     player.style.left = playerX + "px";
 
@@ -499,6 +763,7 @@ function restartGame() {
 
     gameRunning = true;
 
+    lastFrameTime = performance.now();
     gameLoop();
 }
 
@@ -506,10 +771,29 @@ function restartGame() {
 // ===============================
 // GAME LOOP
 // ===============================
+// Movement is scaled by deltaFactor so the game runs at the same real-world
+// speed on every screen, whether it's calling this loop 60 times a second
+// (a normal monitor/phone) or 144+ times a second (a high refresh-rate
+// monitor). Without this, speeds set as "pixels per frame" would make the
+// game run faster on higher refresh-rate displays.
 
-function gameLoop() {
+let lastFrameTime = performance.now();
+
+function gameLoop(currentTime) {
 
     if (!gameRunning) return;
+
+    if (currentTime === undefined) {
+        currentTime = performance.now();
+    }
+
+    const deltaMs = currentTime - lastFrameTime;
+    lastFrameTime = currentTime;
+
+    // 1.0 at a normal 60fps frame; higher on faster displays, lower on
+    // slower ones. Clamped so a tab coming back from being backgrounded
+    // doesn't cause one giant jump.
+    const deltaFactor = Math.min(deltaMs / (1000 / 60), 3);
 
 
     updateDifficulty();
@@ -518,11 +802,11 @@ function gameLoop() {
     // PLAYER MOVEMENT
 
     if (moveLeft) {
-        playerX -= playerSpeed;
+        playerX -= playerSpeed * deltaFactor;
     }
 
     if (moveRight) {
-        playerX += playerSpeed;
+        playerX += playerSpeed * deltaFactor;
     }
 
     playerX = Math.max(0, Math.min(370, playerX));
@@ -534,7 +818,7 @@ function gameLoop() {
 
     enemies.forEach(function(enemy) {
 
-        enemy.y += enemy.speed;
+        enemy.y += enemy.speed * slowMoFactor * deltaFactor;
 
         enemy.element.style.top = enemy.y + "px";
 
@@ -552,6 +836,28 @@ function gameLoop() {
     });
 
 
+    // POWER-UPS
+
+    for (let i = powerUps.length - 1; i >= 0; i--) {
+
+        const powerUp = powerUps[i];
+
+        powerUp.y += powerUp.speed * slowMoFactor * deltaFactor;
+        powerUp.element.style.top = powerUp.y + "px";
+        powerUp.element.style.left = powerUp.x + "px";
+
+        if (checkPowerUpCollision(powerUp)) {
+            collectPowerUp(powerUp);
+            continue;
+        }
+
+        // Missed it - remove once it falls off screen
+        if (powerUp.y > 600) {
+            removePowerUp(powerUp);
+        }
+    }
+
+
     requestAnimationFrame(gameLoop);
 }
 
@@ -566,4 +872,5 @@ for (let i = 0; i < enemyCount; i++) {
 
 }
 
+schedulePowerUp();
 gameLoop();
