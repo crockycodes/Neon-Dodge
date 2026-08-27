@@ -3,7 +3,7 @@
 
 A fast-paced browser dodging game built with plain HTML, CSS, and JavaScript — no frameworks, no game engine, no dependencies. Control a glowing orb, survive an endless stream of falling neon enemies, and chase your high score.
 
-**▶ [Play it live](#)** <!-- replace # with your GitHub Pages link once it's deployed -->
+**▶ [Play it live](https://crockycodes.github.io/Neon-Dodge)** 
 
 ---
 
