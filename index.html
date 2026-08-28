@@ -19,6 +19,7 @@
     <nav class="site-nav">
         <span class="logo">NEON<span class="logo-accent">DODGE</span></span>
         <div class="nav-right">
+            <button id="statsToggle" class="music-btn">📊 Stats</button>
             <button id="musicToggle" class="music-btn">🔈 Music: Off</button>
             <a class="repo-link" href="https://github.com/crockycodes" target="_blank" rel="noopener">View on GitHub →</a>
         </div>
@@ -47,17 +48,39 @@
         <div class="game-wrapper" id="gameWrapper">
             <div id="game">
 
+                <div id="starsBack"></div>
+
                 <div id="score">Score: 0</div>
                 <div id="highscore">Best: 0</div>
                 <div id="combo"></div>
+                <div id="nearMiss"></div>
+                <div id="sprintTimer"></div>
 
                 <div id="slowmoOverlay"></div>
 
                 <div id="player"></div>
 
+                <div id="startScreen" class="visible">
+                    <div id="startTitle">SELECT MODE</div>
+                    <div id="difficultyRow">
+                        <button class="mode-btn" data-mode="easy">Easy</button>
+                        <button class="mode-btn" data-mode="normal">Normal</button>
+                        <button class="mode-btn" data-mode="hard">Hard</button>
+                    </div>
+                    <div id="sprintRow">
+                        <button class="mode-btn sprint-btn" data-mode="sprint">⏱ Sprint (60s)</button>
+                    </div>
+                    <div id="startHint">Survive as long as you can — or beat the clock in Sprint</div>
+                </div>
+
                 <div id="gameOverOverlay">
                     <div id="gameOverTitle">GAME OVER</div>
                     <div id="gameOverScore"></div>
+                    <div id="topRunsList"></div>
+                    <div id="gameOverActions">
+                        <button id="shareBtn" type="button">🔗 Share</button>
+                        <button id="screenshotBtn" type="button">📸 Save image</button>
+                    </div>
                     <div id="gameOverHint">
                         <span class="hint-keyboard">Press SPACE to restart</span>
                         <span class="hint-touch">Tap anywhere to restart</span>
@@ -72,6 +95,12 @@
                     </div>
                 </div>
 
+                <div id="statsScreen">
+                    <div id="statsTitle">YOUR STATS</div>
+                    <div id="statsBody"></div>
+                    <button id="statsCloseBtn" type="button">Close</button>
+                </div>
+
                 <button id="pauseBtn" aria-label="Pause">❚❚</button>
 
             </div>
@@ -81,7 +110,8 @@
             <div class="how-to-play-item hint-keyboard"><span class="key">←</span><span class="key">→</span> Move</div>
             <div class="how-to-play-item hint-keyboard"><span class="key key-wide">SPACE</span> Restart</div>
             <div class="how-to-play-item hint-touch">👆 Drag left/right to move · tap to restart</div>
-            <div class="how-to-play-item">🛡 shield · ⏱ slow-mo — grab the falling icons</div>
+            <div class="how-to-play-item">🛡 shield · ⏱ slow-mo · 🧲 magnet · ✕2 multiplier — grab the falling icons</div>
+            <div class="how-to-play-item">✨ near-misses score bonus points too</div>
         </div>
 
     </main>

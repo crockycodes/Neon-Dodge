@@ -5,6 +5,13 @@ const scoreDisplay = document.getElementById("score");
 const highScoreDisplay = document.getElementById("highscore");
 const gameOverOverlay = document.getElementById("gameOverOverlay");
 const gameOverScore = document.getElementById("gameOverScore");
+const gameOverTitle = document.getElementById("gameOverTitle");
+const topRunsList = document.getElementById("topRunsList");
+const nearMissEl = document.getElementById("nearMiss");
+const sprintTimerEl = document.getElementById("sprintTimer");
+const startScreen = document.getElementById("startScreen");
+const statsScreen = document.getElementById("statsScreen");
+const statsBody = document.getElementById("statsBody");
 
 
 // ===============================
@@ -23,7 +30,8 @@ let moveRight = false;
 // ===============================
 
 let score = 0;
-let gameRunning = true;
+let gameRunning = false;   // true only while actively playing
+let gameStarted = false;   // becomes true once a mode is picked (stays true after game-over)
 let gamePaused = false;
 
 let highScore = Number(localStorage.getItem("neonDodgeHighScore")) || 0;
@@ -43,6 +51,40 @@ let hasShield = false;
 let slowMoFactor = 1; // 1 = normal speed, 0.5 = slow-mo active
 let slowMoTimeoutId = null;
 const slowmoOverlay = document.getElementById("slowmoOverlay");
+
+let magnetActive = false;
+let magnetTimeoutId = null;
+
+let scoreMultiplierActive = false;
+let scoreMultiplierTimeoutId = null;
+
+
+// ===============================
+// GAME MODE / DIFFICULTY SELECT
+// ===============================
+
+let gameMode = "normal"; // "easy" | "normal" | "hard" | "sprint"
+
+const modeSpeedMultiplier = {
+    easy: 0.7,
+    normal: 1,
+    hard: 1.35,
+    sprint: 1
+};
+
+const SPRINT_DURATION = 60; // seconds
+let sprintTimeLeft = SPRINT_DURATION;
+let sprintIntervalId = null;
+
+document.querySelectorAll(".mode-btn").forEach(function(btn) {
+    btn.addEventListener("click", function() {
+        getAudioCtx();
+        resumeMusicIfPending();
+        gameMode = btn.dataset.mode;
+        startScreen.classList.remove("visible");
+        beginRun();
+    });
+});
 
 
 // ===============================
@@ -97,6 +139,15 @@ function playShieldBreakSound() {
 
 function playComboSound() {
     playTone(1320, 0.1, "sine");
+}
+
+function playNearMissSound() {
+    playTone(1760, 0.05, "sine");
+}
+
+function playMultiplierSound() {
+    playTone(520, 0.1, "sawtooth");
+    setTimeout(function() { playTone(780, 0.14, "sawtooth"); }, 80);
 }
 
 
@@ -322,7 +373,7 @@ document.addEventListener("keydown", function(event) {
 
     if (event.code === "Space") {
         event.preventDefault();
-        if (!gameRunning) {
+        if (gameStarted && !gameRunning && !statsScreen.classList.contains("visible")) {
             restartGame();
         }
     }
@@ -383,15 +434,17 @@ game.addEventListener("touchmove", function(event) {
 
 gameOverOverlay.addEventListener("touchstart", function(event) {
     event.preventDefault();
-    if (!gameRunning) {
+    if (gameStarted && !gameRunning) {
         restartGame();
     }
 });
 
 // Also handle mouse clicks on the overlay, for desktop users who'd
 // rather click than reach for the keyboard
-gameOverOverlay.addEventListener("click", function() {
-    if (!gameRunning) {
+gameOverOverlay.addEventListener("click", function(event) {
+    // Don't restart when the click was on the share/screenshot buttons
+    if (event.target.closest("#gameOverActions")) return;
+    if (gameStarted && !gameRunning) {
         restartGame();
     }
 });
@@ -427,15 +480,28 @@ const enemies = [];
 
 const enemyCount = 3;
 
+// Each type tweaks size/speed; zigzag only starts appearing once
+// difficulty has ramped up a bit, so early game stays predictable.
+const enemyTypeDefs = {
+    normal: { size: 30, speedMult: 1,    color: "#ff2a6d", minDifficulty: 0 },
+    fast:   { size: 20, speedMult: 1.6,  color: "#ff5ea3", minDifficulty: 0 },
+    big:    { size: 44, speedMult: 0.65, color: "#c91f52", minDifficulty: 0 },
+    zigzag: { size: 26, speedMult: 1,    color: "#ff2ad4", minDifficulty: 1.5 }
+};
+
+function pickEnemyType() {
+
+    const available = Object.keys(enemyTypeDefs).filter(function(key) {
+        return difficulty >= enemyTypeDefs[key].minDifficulty;
+    });
+
+    return available[Math.floor(Math.random() * available.length)];
+}
 
 function createEnemy() {
 
     const enemy = document.createElement("div");
 
-    enemy.style.width = "30px";
-    enemy.style.height = "30px";
-    enemy.style.background = "#ff2a6d";
-    enemy.style.boxShadow = "0 0 8px #ff2a6d, 0 0 16px #ff2a6d";
     enemy.style.position = "absolute";
 
     game.appendChild(enemy);
@@ -444,7 +510,13 @@ function createEnemy() {
         element: enemy,
         x: Math.random() * 370,
         y: -30,
-        speed: 3 + Math.random() * 2
+        size: 30,
+        speed: 3 + Math.random() * 2,
+        type: "normal",
+        zigzagPhase: 0,
+        nearMissAwarded: false,
+        spawning: false,
+        spawnTimeoutId: null
     };
 
     enemies.push(enemyData);
@@ -453,16 +525,58 @@ function createEnemy() {
 }
 
 
-// Places an enemy at a fresh random spawn point (no score change)
+// Places an enemy at a fresh random spawn point (no score change).
+// Enemies briefly telegraph where they'll fall (a warning flash at the
+// spawn x) before actually appearing and starting to move.
 function placeEnemy(enemy) {
 
-    enemy.x = Math.random() * 370;
-    enemy.y = -30;
+    clearTimeout(enemy.spawnTimeoutId);
 
-    enemy.speed = (3 + Math.random() * 2) * difficulty;
+    const type = pickEnemyType();
+    const def = enemyTypeDefs[type];
 
+    enemy.type = type;
+    enemy.size = def.size;
+    enemy.x = Math.random() * (400 - def.size);
+    enemy.y = -def.size;
+    enemy.speed = (3 + Math.random() * 2) * def.speedMult * difficulty;
+    enemy.zigzagPhase = Math.random() * Math.PI * 2;
+    enemy.nearMissAwarded = false;
+
+    enemy.element.style.width = def.size + "px";
+    enemy.element.style.height = def.size + "px";
+    enemy.element.style.background = def.color;
+    enemy.element.style.boxShadow = "0 0 8px " + def.color + ", 0 0 16px " + def.color;
+    enemy.element.style.borderRadius = (type === "zigzag") ? "6px" : "0px";
     enemy.element.style.left = enemy.x + "px";
     enemy.element.style.top = enemy.y + "px";
+
+    // Telegraph the spawn: hide the enemy, flash a warning at its spot,
+    // then reveal it and let it start falling.
+    enemy.spawning = true;
+    enemy.element.style.opacity = "0";
+    spawnWarningFlash(enemy.x, enemy.size, def.color);
+
+    enemy.spawnTimeoutId = setTimeout(function() {
+        enemy.spawning = false;
+        enemy.element.style.opacity = "1";
+    }, 260);
+}
+
+
+function spawnWarningFlash(x, size, color) {
+
+    const flash = document.createElement("div");
+    flash.className = "spawn-warning";
+    flash.style.left = x + "px";
+    flash.style.width = size + "px";
+    flash.style.background = "radial-gradient(circle, " + color + " 0%, transparent 75%)";
+
+    game.appendChild(flash);
+
+    setTimeout(function() {
+        flash.remove();
+    }, 500);
 }
 
 
@@ -481,10 +595,18 @@ function dodgeEnemy(enemy) {
         pulseCombo();
     }
 
-    score += comboMultiplier;
+    let gained = comboMultiplier;
+    if (scoreMultiplierActive) gained *= 2;
+
+    score += gained;
     scoreDisplay.textContent = "Score: " + score;
 
     updateComboDisplay();
+
+    runStats.dodges++;
+    if (comboCount > runStats.longestStreakThisRun) {
+        runStats.longestStreakThisRun = comboCount;
+    }
 
     playDodgeSound();
 }
@@ -518,14 +640,69 @@ function resetCombo() {
 
 
 // ===============================
+// NEAR-MISS BONUS
+// ===============================
+// Awards a small score bump when the player squeezes past an enemy with
+// only a small horizontal gap to spare, without needing to touch it.
+
+const NEAR_MISS_MARGIN = 16; // px of horizontal gap counted as "close"
+const NEAR_MISS_BAND_TOP = 500;
+const NEAR_MISS_BAND_BOTTOM = 580;
+
+function checkNearMiss(enemy) {
+
+    if (enemy.nearMissAwarded) return;
+
+    const enemyTop = enemy.y;
+    const enemyBottom = enemy.y + enemy.size;
+
+    // Only check while the enemy is passing through the player's row
+    if (enemyBottom < NEAR_MISS_BAND_TOP || enemyTop > NEAR_MISS_BAND_BOTTOM) return;
+
+    const playerLeft = playerX;
+    const playerRight = playerX + 30;
+    const enemyLeft = enemy.x;
+    const enemyRight = enemy.x + enemy.size;
+
+    // Not overlapping (that's a collision, handled elsewhere), but close
+    const gap = (enemyLeft > playerRight)
+        ? enemyLeft - playerRight
+        : (playerLeft > enemyRight ? playerLeft - enemyRight : -1);
+
+    if (gap >= 0 && gap <= NEAR_MISS_MARGIN) {
+        enemy.nearMissAwarded = true;
+        awardNearMiss();
+    }
+}
+
+function awardNearMiss() {
+
+    score += 1;
+    scoreDisplay.textContent = "Score: " + score;
+
+    playNearMissSound();
+
+    nearMissEl.textContent = "+1 close call";
+    nearMissEl.style.left = Math.max(0, Math.min(340, playerX - 25)) + "px";
+    nearMissEl.style.top = "510px";
+
+    nearMissEl.classList.remove("pop");
+    void nearMissEl.offsetWidth;
+    nearMissEl.classList.add("pop");
+}
+
+
+// ===============================
 // POWER-UPS
 // ===============================
 
 const powerUps = [];
 
 const powerUpTypes = {
-    shield: { symbol: "🛡", color: "#05d9e8" },
-    slowmo: { symbol: "⏱", color: "#ffde59" }
+    shield:     { symbol: "🛡", color: "#05d9e8" },
+    slowmo:     { symbol: "⏱", color: "#ffde59" },
+    magnet:     { symbol: "🧲", color: "#ffde59" },
+    multiplier: { symbol: "✕2", color: "#ff2a6d" }
 };
 
 function spawnPowerUp() {
@@ -541,6 +718,7 @@ function spawnPowerUp() {
     el.textContent = info.symbol;
     el.style.borderColor = info.color;
     el.style.boxShadow = "0 0 10px " + info.color + ", 0 0 20px " + info.color;
+    if (type === "multiplier") el.style.fontSize = "12px";
 
     game.appendChild(el);
 
@@ -553,11 +731,13 @@ function spawnPowerUp() {
     });
 }
 
+let powerUpTimeoutId = null;
+
 function schedulePowerUp() {
 
     const delay = 7000 + Math.random() * 6000; // every 7-13 seconds
 
-    setTimeout(function() {
+    powerUpTimeoutId = setTimeout(function() {
         spawnPowerUp();
         schedulePowerUp();
     }, delay);
@@ -599,6 +779,10 @@ function collectPowerUp(powerUp) {
         activateShield();
     } else if (powerUp.type === "slowmo") {
         activateSlowMo();
+    } else if (powerUp.type === "magnet") {
+        activateMagnet();
+    } else if (powerUp.type === "multiplier") {
+        activateMultiplier();
     }
 
     removePowerUp(powerUp);
@@ -639,6 +823,54 @@ function activateSlowMo() {
     }, 5000);
 }
 
+function activateMagnet() {
+
+    magnetActive = true;
+    player.classList.add("magnetized");
+
+    clearTimeout(magnetTimeoutId);
+    magnetTimeoutId = setTimeout(function() {
+        magnetActive = false;
+        player.classList.remove("magnetized");
+    }, 6000);
+}
+
+function activateMultiplier() {
+
+    scoreMultiplierActive = true;
+    playMultiplierSound();
+    showMultiplierFlash();
+
+    clearTimeout(scoreMultiplierTimeoutId);
+    scoreMultiplierTimeoutId = setTimeout(function() {
+        scoreMultiplierActive = false;
+    }, 8000);
+}
+
+function showMultiplierFlash() {
+
+    let flash = document.getElementById("multiplierFlash");
+    if (!flash) {
+        flash = document.createElement("div");
+        flash.id = "multiplierFlash";
+        game.appendChild(flash);
+    }
+
+    flash.textContent = "✕2 SCORE!";
+    flash.style.left = "130px";
+    flash.style.top = "260px";
+    flash.style.fontSize = "22px";
+    flash.style.opacity = "1";
+    flash.style.transition = "none";
+
+    // Force reflow so the transition below actually replays
+    void flash.offsetWidth;
+
+    flash.style.transition = "opacity 1s ease, transform 1s ease";
+    flash.style.transform = "translateY(-20px) scale(1.15)";
+    flash.style.opacity = "0";
+}
+
 
 // ===============================
 // DIFFICULTY
@@ -649,7 +881,8 @@ function updateDifficulty() {
     const secondsSurvived = (Date.now() - startTime) / 1000;
 
     // Speeds up gradually, caps out so it stays playable
-    difficulty = 1 + Math.min(secondsSurvived / 20, 2.5);
+    const ramp = 1 + Math.min(secondsSurvived / 20, 2.5);
+    difficulty = ramp * modeSpeedMultiplier[gameMode];
 }
 
 
@@ -708,6 +941,45 @@ function animateParticle(particle, x, y, vx, vy) {
 
 
 // ===============================
+// PLAYER TRAIL
+// ===============================
+// A lightweight fading dot dropped behind the player every couple of
+// frames - cheap enough to not need the full particle physics above.
+
+let trailFrameCounter = 0;
+
+function maybeSpawnTrailDot() {
+
+    trailFrameCounter++;
+    if (trailFrameCounter % 3 !== 0) return; // throttle for performance
+
+    const dot = document.createElement("div");
+    dot.className = "trail-particle";
+    dot.style.left = playerX + "px";
+    dot.style.top = "550px";
+    dot.style.opacity = "0.35";
+
+    game.appendChild(dot);
+
+    let opacity = 0.35;
+
+    function fade() {
+        opacity -= 0.025;
+        dot.style.opacity = opacity;
+        dot.style.transform = "scale(" + (1 - (0.35 - opacity)) + ")";
+
+        if (opacity > 0) {
+            requestAnimationFrame(fade);
+        } else {
+            dot.remove();
+        }
+    }
+
+    requestAnimationFrame(fade);
+}
+
+
+// ===============================
 // SCREEN SHAKE
 // ===============================
 
@@ -727,14 +999,16 @@ function triggerShake() {
 
 function checkCollision(enemy) {
 
+    if (enemy.spawning) return;
+
     const playerTop = 550;
     const playerBottom = 580;
 
     const enemyLeft = enemy.x;
-    const enemyRight = enemy.x + 30;
+    const enemyRight = enemy.x + enemy.size;
 
     const enemyTop = enemy.y;
-    const enemyBottom = enemy.y + 30;
+    const enemyBottom = enemy.y + enemy.size;
 
     if (
         playerX < enemyRight &&
@@ -745,9 +1019,249 @@ function checkCollision(enemy) {
         if (hasShield) {
             consumeShield(enemy);
         } else {
-            triggerGameOver();
+            triggerGameOver("crash");
         }
+    } else {
+        checkNearMiss(enemy);
     }
+}
+
+
+// ===============================
+// PERSISTENT STATS (localStorage)
+// ===============================
+
+function loadLifetimeStats() {
+
+    const raw = localStorage.getItem("neonDodgeLifetimeStats");
+
+    if (!raw) {
+        return { totalDodged: 0, longestStreak: 0, playCount: 0 };
+    }
+
+    try {
+        const parsed = JSON.parse(raw);
+        return {
+            totalDodged: parsed.totalDodged || 0,
+            longestStreak: parsed.longestStreak || 0,
+            playCount: parsed.playCount || 0
+        };
+    } catch (e) {
+        return { totalDodged: 0, longestStreak: 0, playCount: 0 };
+    }
+}
+
+function saveLifetimeStats() {
+    localStorage.setItem("neonDodgeLifetimeStats", JSON.stringify(lifetimeStats));
+}
+
+let lifetimeStats = loadLifetimeStats();
+
+// Tracked during the current run, folded into lifetimeStats on game over
+let runStats = { dodges: 0, longestStreakThisRun: 0 };
+
+function loadTopRuns() {
+
+    const raw = localStorage.getItem("neonDodgeTopRuns");
+
+    if (!raw) return [];
+
+    try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+        return [];
+    }
+}
+
+function saveTopRuns(runs) {
+    localStorage.setItem("neonDodgeTopRuns", JSON.stringify(runs));
+}
+
+// Inserts a finished run into the top-5 list (sorted desc by score)
+function insertTopRun(finalScore) {
+
+    const runs = loadTopRuns();
+
+    runs.push({
+        score: finalScore,
+        date: new Date().toLocaleDateString()
+    });
+
+    runs.sort(function(a, b) { return b.score - a.score; });
+
+    const top5 = runs.slice(0, 5);
+    saveTopRuns(top5);
+
+    return top5;
+}
+
+function renderTopRuns(justPlayedScore) {
+
+    const runs = loadTopRuns();
+
+    if (runs.length === 0) {
+        topRunsList.innerHTML = "";
+        return;
+    }
+
+    let html = '<div class="top-runs-heading">TOP 5 RUNS</div>';
+
+    let markedCurrent = false;
+
+    runs.forEach(function(run) {
+        const isCurrent = !markedCurrent && run.score === justPlayedScore;
+        if (isCurrent) markedCurrent = true;
+
+        html += '<div class="top-run-row' + (isCurrent ? ' current' : '') + '">' +
+                run.score + ' pts — ' + run.date +
+                '</div>';
+    });
+
+    topRunsList.innerHTML = html;
+}
+
+function renderStats() {
+
+    statsBody.innerHTML =
+        '<div>Games played: <strong>' + lifetimeStats.playCount + '</strong></div>' +
+        '<div>Enemies dodged (lifetime): <strong>' + lifetimeStats.totalDodged + '</strong></div>' +
+        '<div>Longest streak: <strong>' + lifetimeStats.longestStreak + '</strong></div>' +
+        '<div>Best score: <strong>' + highScore + '</strong></div>';
+}
+
+const statsToggleBtn = document.getElementById("statsToggle");
+const statsCloseBtn = document.getElementById("statsCloseBtn");
+
+if (statsToggleBtn) {
+    statsToggleBtn.addEventListener("click", function() {
+        renderStats();
+        statsScreen.classList.add("visible");
+        if (gameRunning && !gamePaused) togglePause();
+    });
+}
+
+if (statsCloseBtn) {
+    statsCloseBtn.addEventListener("click", function() {
+        statsScreen.classList.remove("visible");
+    });
+}
+
+
+// ===============================
+// SHARE / SCREENSHOT
+// ===============================
+
+const shareBtn = document.getElementById("shareBtn");
+const screenshotBtn = document.getElementById("screenshotBtn");
+
+if (shareBtn) {
+    shareBtn.addEventListener("click", function(event) {
+        event.stopPropagation();
+
+        const text = "I scored " + score + " on Neon Dodge! 🎮";
+        const url = window.location.href;
+
+        if (navigator.share) {
+            navigator.share({ text: text, url: url }).catch(function() {});
+        } else if (navigator.clipboard) {
+            navigator.clipboard.writeText(text + " " + url).then(function() {
+                shareBtn.textContent = "✓ Copied!";
+                setTimeout(function() { shareBtn.textContent = "🔗 Share"; }, 1800);
+            });
+        } else {
+            window.open(
+                "https://twitter.com/intent/tweet?text=" + encodeURIComponent(text) + "&url=" + encodeURIComponent(url),
+                "_blank"
+            );
+        }
+    });
+}
+
+if (screenshotBtn) {
+    screenshotBtn.addEventListener("click", function(event) {
+        event.stopPropagation();
+        downloadScoreImage();
+    });
+}
+
+function downloadScoreImage() {
+
+    const canvas = document.createElement("canvas");
+    canvas.width = 500;
+    canvas.height = 300;
+    const ctx = canvas.getContext("2d");
+
+    // Background
+    const bg = ctx.createLinearGradient(0, 0, 0, canvas.height);
+    bg.addColorStop(0, "#12081f");
+    bg.addColorStop(1, "#0a0118");
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Border glow
+    ctx.strokeStyle = "#05d9e8";
+    ctx.lineWidth = 3;
+    ctx.strokeRect(8, 8, canvas.width - 16, canvas.height - 16);
+
+    ctx.textAlign = "center";
+
+    ctx.fillStyle = "#f4f1ff";
+    ctx.font = "bold 34px Arial";
+    ctx.fillText("NEON DODGE", canvas.width / 2, 80);
+
+    ctx.fillStyle = "#05d9e8";
+    ctx.font = "bold 48px Arial";
+    ctx.fillText("Score: " + score, canvas.width / 2, 150);
+
+    ctx.fillStyle = "#8b7fa8";
+    ctx.font = "20px Arial";
+    ctx.fillText("Best: " + highScore, canvas.width / 2, 190);
+
+    ctx.fillStyle = "#ff2a6d";
+    ctx.font = "16px Arial";
+    ctx.fillText("Play it yourself — link in bio", canvas.width / 2, 250);
+
+    const link = document.createElement("a");
+    link.download = "neon-dodge-score.png";
+    link.href = canvas.toDataURL("image/png");
+    link.click();
+}
+
+
+// ===============================
+// SPRINT MODE TIMER
+// ===============================
+
+function startSprintTimer() {
+
+    sprintTimeLeft = SPRINT_DURATION;
+    sprintTimerEl.classList.add("visible");
+    sprintTimerEl.classList.remove("urgent");
+    sprintTimerEl.textContent = "⏱ " + sprintTimeLeft + "s";
+
+    clearInterval(sprintIntervalId);
+    sprintIntervalId = setInterval(function() {
+
+        if (gamePaused) return;
+
+        sprintTimeLeft--;
+        sprintTimerEl.textContent = "⏱ " + sprintTimeLeft + "s";
+
+        if (sprintTimeLeft <= 10) {
+            sprintTimerEl.classList.add("urgent");
+        }
+
+        if (sprintTimeLeft <= 0) {
+            clearInterval(sprintIntervalId);
+            triggerGameOver("time");
+        }
+    }, 1000);
+}
+
+function stopSprintTimer() {
+    clearInterval(sprintIntervalId);
+    sprintTimerEl.classList.remove("visible");
 }
 
 
@@ -755,13 +1269,17 @@ function checkCollision(enemy) {
 // GAME OVER / RESTART
 // ===============================
 
-function triggerGameOver() {
+function triggerGameOver(reason) {
 
     gameRunning = false;
 
-    playCrashSound();
-    triggerShake();
-    spawnParticles(playerX + 15, 565);
+    if (gameMode === "sprint") stopSprintTimer();
+
+    if (reason !== "time") {
+        playCrashSound();
+        triggerShake();
+        spawnParticles(playerX + 15, 565);
+    }
 
     const isNewBest = score > highScore;
 
@@ -771,6 +1289,18 @@ function triggerGameOver() {
     }
 
     highScoreDisplay.textContent = "Best: " + highScore;
+
+    // Fold this run's stats into lifetime totals
+    lifetimeStats.totalDodged += runStats.dodges;
+    if (runStats.longestStreakThisRun > lifetimeStats.longestStreak) {
+        lifetimeStats.longestStreak = runStats.longestStreakThisRun;
+    }
+    saveLifetimeStats();
+
+    insertTopRun(score);
+    renderTopRuns(score);
+
+    gameOverTitle.textContent = (reason === "time") ? "TIME'S UP" : "GAME OVER";
 
     if (isNewBest && score > 0) {
         gameOverScore.innerHTML = "Score: " + score + '<div id="newBestFlash">★ NEW BEST! ★</div>';
@@ -794,12 +1324,21 @@ function restartGame() {
 
     resetCombo();
 
+    runStats = { dodges: 0, longestStreakThisRun: 0 };
+
     hasShield = false;
     player.classList.remove("shielded");
 
     slowMoFactor = 1;
     slowmoOverlay.classList.remove("active");
     clearTimeout(slowMoTimeoutId);
+
+    magnetActive = false;
+    player.classList.remove("magnetized");
+    clearTimeout(magnetTimeoutId);
+
+    scoreMultiplierActive = false;
+    clearTimeout(scoreMultiplierTimeoutId);
 
     powerUps.forEach(function(powerUp) {
         powerUp.element.remove();
@@ -816,6 +1355,42 @@ function restartGame() {
         placeEnemy(enemy);
     });
 
+    lifetimeStats.playCount++;
+    saveLifetimeStats();
+
+    if (gameMode === "sprint") {
+        startSprintTimer();
+    } else {
+        stopSprintTimer();
+    }
+
+    gameRunning = true;
+
+    lastFrameTime = performance.now();
+    gameLoop();
+}
+
+
+// First-ever run after a mode is picked on the start screen
+function beginRun() {
+
+    gameStarted = true;
+
+    for (let i = 0; i < enemyCount; i++) {
+        createEnemy();
+    }
+
+    schedulePowerUp();
+
+    lifetimeStats.playCount++;
+    saveLifetimeStats();
+
+    if (gameMode === "sprint") {
+        startSprintTimer();
+    }
+
+    startTime = Date.now();
+    difficulty = 1;
     gameRunning = true;
 
     lastFrameTime = performance.now();
@@ -833,7 +1408,7 @@ let pauseStartedAt = 0;
 
 function togglePause() {
 
-    if (!gameRunning) return; // no pausing on the game-over screen
+    if (!gameRunning) return; // no pausing on the game-over/start screen
 
     gamePaused = !gamePaused;
 
@@ -922,12 +1497,25 @@ function gameLoop(currentTime) {
 
     player.style.left = playerX + "px";
 
+    if (moveLeft || moveRight) {
+        maybeSpawnTrailDot();
+    }
+
 
     // ENEMIES
 
     enemies.forEach(function(enemy) {
 
+        if (enemy.spawning) return;
+
         enemy.y += enemy.speed * slowMoFactor * deltaFactor;
+
+        if (enemy.type === "zigzag") {
+            enemy.zigzagPhase += 0.06 * deltaFactor;
+            const drift = Math.sin(enemy.zigzagPhase) * 2.2 * deltaFactor;
+            enemy.x = Math.max(0, Math.min(400 - enemy.size, enemy.x + drift));
+            enemy.element.style.left = enemy.x + "px";
+        }
 
         enemy.element.style.top = enemy.y + "px";
 
@@ -951,7 +1539,22 @@ function gameLoop(currentTime) {
 
         const powerUp = powerUps[i];
 
-        powerUp.y += powerUp.speed * slowMoFactor * deltaFactor;
+        if (magnetActive) {
+            // Pull nearby power-ups toward the player
+            const dx = (playerX + 15) - (powerUp.x + 15);
+            const dy = 565 - powerUp.y;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+
+            if (dist < 160) {
+                powerUp.x += (dx / dist) * 5 * deltaFactor;
+                powerUp.y += (dy / dist) * 5 * deltaFactor;
+            } else {
+                powerUp.y += powerUp.speed * slowMoFactor * deltaFactor;
+            }
+        } else {
+            powerUp.y += powerUp.speed * slowMoFactor * deltaFactor;
+        }
+
         powerUp.element.style.top = powerUp.y + "px";
         powerUp.element.style.left = powerUp.x + "px";
 
@@ -972,14 +1575,9 @@ function gameLoop(currentTime) {
 
 
 // ===============================
-// START GAME
+// START
 // ===============================
+// The game no longer auto-starts: it waits on the mode-select screen
+// (#startScreen) and beginRun() kicks things off once a mode is chosen.
 
-for (let i = 0; i < enemyCount; i++) {
-
-    createEnemy();
-
-}
-
-schedulePowerUp();
-gameLoop();
+resizeGame();
