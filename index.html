@@ -19,7 +19,6 @@
     <nav class="site-nav">
         <span class="logo">NEON<span class="logo-accent">DODGE</span></span>
         <div class="nav-right">
-            <button id="leaderboardToggle" class="music-btn">🏆 Leaderboard</button>
             <button id="musicToggle" class="music-btn">🔈 Music: Off</button>
             <a class="repo-link" href="https://github.com/crockycodes" target="_blank" rel="noopener">View on GitHub →</a>
         </div>
@@ -59,13 +58,6 @@
                 <div id="gameOverOverlay">
                     <div id="gameOverTitle">GAME OVER</div>
                     <div id="gameOverScore"></div>
-
-                    <div id="scoreSubmitRow">
-                        <input id="nameInput" type="text" maxlength="20" placeholder="Your name" autocomplete="off">
-                        <button id="submitScoreBtn">Submit</button>
-                    </div>
-                    <div id="submitStatus"></div>
-
                     <div id="gameOverHint">
                         <span class="hint-keyboard">Press SPACE to restart</span>
                         <span class="hint-touch">Tap anywhere to restart</span>
@@ -98,21 +90,6 @@
         <p>Built with HTML, CSS &amp; JavaScript — no game engine, no dependencies.</p>
         <p class="footer-credit">Made by Saurav — <a href="https://github.com/crockycodes" target="_blank" rel="noopener">@crockycodes</a></p>
     </footer>
-
-    <div id="leaderboardModal">
-        <div id="leaderboardCard">
-            <div id="leaderboardHeader">
-                <span>🏆 TOP RUNS</span>
-                <button id="leaderboardClose" aria-label="Close">✕</button>
-            </div>
-            <ol id="leaderboardList"></ol>
-            <div id="leaderboardEmpty">No scores yet — be the first!</div>
-        </div>
-    </div>
-
-    <!-- Firebase (Firestore) — free tier, no backend server needed -->
-    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 
     <script src="game.js"></script>
 </body>
