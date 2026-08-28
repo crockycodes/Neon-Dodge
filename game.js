@@ -831,22 +831,6 @@ const pauseOverlay = document.getElementById("pauseOverlay");
 const pauseBtn = document.getElementById("pauseBtn");
 let pauseStartedAt = 0;
 
-if (pauseBtn) {
-    pauseBtn.addEventListener("click", function(event) {
-        event.stopPropagation(); // don't let this bubble up as a "move" tap
-        getAudioCtx();
-        resumeMusicIfPending();
-        togglePause();
-    });
-}
-
-if (pauseOverlay) {
-    pauseOverlay.addEventListener("click", function(event) {
-        event.stopPropagation();
-        togglePause();
-    });
-}
-
 function togglePause() {
 
     if (!gameRunning) return; // no pausing on the game-over screen
@@ -874,6 +858,22 @@ function togglePause() {
 
         gameLoop();
     }
+}
+
+if (pauseBtn) {
+    pauseBtn.addEventListener("click", function(event) {
+        event.stopPropagation(); // don't let this bubble up as a "move" tap
+        getAudioCtx();
+        resumeMusicIfPending();
+        togglePause();
+    });
+}
+
+if (pauseOverlay) {
+    pauseOverlay.addEventListener("click", function(event) {
+        event.stopPropagation();
+        togglePause();
+    });
 }
 
 
