@@ -24,6 +24,7 @@ let moveRight = false;
 
 let score = 0;
 let gameRunning = true;
+let gamePaused = false;
 
 let highScore = Number(localStorage.getItem("neonDodgeHighScore")) || 0;
 highScoreDisplay.textContent = "Best: " + highScore;
@@ -113,7 +114,14 @@ let musicTimeoutId = null;
 let chordIndex = 0;
 
 // currentTrackIndex: -1 means off, otherwise an index into musicTracks
-let currentTrackIndex = -1;
+// Restored from localStorage so the player's last-picked track persists
+// across reloads. Browsers block audio before a user gesture, so we only
+// mark it "pending" here and actually start it on the first keypress/touch.
+let currentTrackIndex = Number(localStorage.getItem("neonDodgeMusicTrack"));
+if (isNaN(currentTrackIndex) || currentTrackIndex < -1) {
+    currentTrackIndex = -1;
+}
+let pendingMusicResume = currentTrackIndex !== -1;
 
 const musicTracks = [
     {
@@ -221,6 +229,9 @@ function cycleMusic() {
         currentTrackIndex = -1;
     }
 
+    localStorage.setItem("neonDodgeMusicTrack", currentTrackIndex);
+    pendingMusicResume = false;
+
     musicGainNode.gain.cancelScheduledValues(ctx.currentTime);
 
     if (currentTrackIndex === -1) {
@@ -262,6 +273,32 @@ if (musicToggleButton) {
     musicToggleButton.addEventListener("click", cycleMusic);
 }
 
+// Starts the previously-picked track (if any) the first time audio is
+// unlocked by a real user gesture. Browsers won't allow sound before that.
+function resumeMusicIfPending() {
+
+    if (!pendingMusicResume || currentTrackIndex === -1) return;
+    pendingMusicResume = false;
+
+    const ctx = getAudioCtx();
+
+    if (!musicGainNode) {
+        setupMusicBus();
+    }
+
+    musicPlaying = true;
+    chordIndex = 0;
+    musicFilterNode.frequency.setTargetAtTime(
+        musicTracks[currentTrackIndex].filterFreq, ctx.currentTime, 0.3
+    );
+    musicGainNode.gain.linearRampToValueAtTime(1, ctx.currentTime + 1);
+    musicLoop();
+
+    updateMusicButtonLabel();
+}
+
+updateMusicButtonLabel();
+
 
 // ===============================
 // KEYBOARD CONTROLS
@@ -271,13 +308,14 @@ document.addEventListener("keydown", function(event) {
 
     // First keypress unlocks audio (browsers block autoplay until interaction)
     getAudioCtx();
+    resumeMusicIfPending();
 
-    if (event.key === "ArrowLeft") {
+    if (event.key === "ArrowLeft" && !gamePaused) {
         moveLeft = true;
         event.preventDefault();
     }
 
-    if (event.key === "ArrowRight") {
+    if (event.key === "ArrowRight" && !gamePaused) {
         moveRight = true;
         event.preventDefault();
     }
@@ -287,6 +325,11 @@ document.addEventListener("keydown", function(event) {
         if (!gameRunning) {
             restartGame();
         }
+    }
+
+    if (event.key === "Escape" || event.key === "p" || event.key === "P") {
+        event.preventDefault();
+        togglePause();
     }
 });
 
@@ -326,13 +369,14 @@ function moveToTouch(touchEvent) {
 
 game.addEventListener("touchstart", function(event) {
     getAudioCtx(); // unlocks audio on first touch, same as first keypress
-    if (gameRunning) {
+    resumeMusicIfPending();
+    if (gameRunning && !gamePaused) {
         moveToTouch(event);
     }
 }, { passive: true });
 
 game.addEventListener("touchmove", function(event) {
-    if (gameRunning) {
+    if (gameRunning && !gamePaused) {
         moveToTouch(event);
     }
 }, { passive: true });
@@ -719,13 +763,27 @@ function triggerGameOver() {
     triggerShake();
     spawnParticles(playerX + 15, 565);
 
-    if (score > highScore) {
+    const isNewBest = score > highScore;
+
+    if (isNewBest) {
         highScore = score;
         localStorage.setItem("neonDodgeHighScore", highScore);
     }
 
     highScoreDisplay.textContent = "Best: " + highScore;
-    gameOverScore.textContent = "Score: " + score;
+
+    if (submitStatus) {
+        submitStatus.textContent = "";
+        submitStatus.className = "";
+    }
+    if (submitScoreBtn) submitScoreBtn.disabled = false;
+
+    if (isNewBest && score > 0) {
+        gameOverScore.innerHTML = "Score: " + score + '<div id="newBestFlash">★ NEW BEST! ★</div>';
+    } else {
+        gameOverScore.textContent = "Score: " + score;
+    }
+
     gameOverOverlay.classList.add("visible");
 }
 
@@ -733,6 +791,9 @@ function triggerGameOver() {
 function restartGame() {
 
     gameOverOverlay.classList.remove("visible");
+
+    gamePaused = false;
+    if (pauseOverlay) pauseOverlay.classList.remove("visible");
 
     score = 0;
     scoreDisplay.textContent = "Score: 0";
@@ -769,6 +830,278 @@ function restartGame() {
 
 
 // ===============================
+// PAUSE
+// ===============================
+
+const pauseOverlay = document.getElementById("pauseOverlay");
+const pauseBtn = document.getElementById("pauseBtn");
+let pauseStartedAt = 0;
+
+if (pauseBtn) {
+    pauseBtn.addEventListener("click", function(event) {
+        event.stopPropagation(); // don't let this bubble up as a "move" tap
+        getAudioCtx();
+        resumeMusicIfPending();
+        togglePause();
+    });
+}
+
+if (pauseOverlay) {
+    pauseOverlay.addEventListener("click", function(event) {
+        event.stopPropagation();
+        togglePause();
+    });
+}
+
+function togglePause() {
+
+    if (!gameRunning) return; // no pausing on the game-over screen
+
+    gamePaused = !gamePaused;
+
+    if (gamePaused) {
+
+        moveLeft = false;
+        moveRight = false;
+        pauseStartedAt = performance.now();
+
+        if (pauseOverlay) pauseOverlay.classList.add("visible");
+
+    } else {
+
+        if (pauseOverlay) pauseOverlay.classList.remove("visible");
+
+        // Resync the clock so the frame after resuming doesn't think a
+        // huge amount of time passed while paused, and difficulty/timing
+        // stay accurate.
+        const pausedDuration = performance.now() - pauseStartedAt;
+        lastFrameTime = performance.now();
+        startTime += pausedDuration;
+
+        gameLoop();
+    }
+}
+
+
+// ===============================
+// LEADERBOARD (Firebase Firestore)
+// ===============================
+// Replace these placeholder values with your own project's config from
+// the Firebase console (Project settings -> General -> Your apps ->
+// SDK setup and configuration). Until you do, the leaderboard UI still
+// shows but every action reports "not set up yet" instead of erroring.
+
+const firebaseConfig = {
+    apiKey: "AIzaSyARo8XyxymS2dUuBepkx5KN7PK_OpYQ7oc",
+    authDomain: "crockycodes-neondodge.firebaseapp.com",
+    projectId: "crockycodes-neondodge",
+    storageBucket: "crockycodes-neondodge.firebasestorage.app",
+    messagingSenderId: "915612532873",
+    appId: "1:915612532873:web:76c0aa4fa50dcbf5bc4658"
+};
+
+let db = null;
+
+try {
+    if (typeof firebase !== "undefined" && firebaseConfig.apiKey !== "YOUR_API_KEY") {
+        firebase.initializeApp(firebaseConfig);
+        db = firebase.firestore();
+    }
+} catch (err) {
+    console.warn("Firebase not configured — leaderboard disabled.", err);
+}
+
+const LEADERBOARD_COLLECTION = "neonDodgeScores";
+
+// Anonymous per-device ID. This (not the typed name) is what identifies
+// "the same player" so a new high score updates their existing row
+// instead of adding a duplicate. No account, no personal info involved.
+function getDeviceId() {
+
+    let id = localStorage.getItem("neonDodgeDeviceId");
+
+    if (!id) {
+        id = "player_" + Date.now() + "_" + Math.random().toString(36).slice(2, 10);
+        localStorage.setItem("neonDodgeDeviceId", id);
+    }
+
+    return id;
+}
+
+const nameInput = document.getElementById("nameInput");
+const submitScoreBtn = document.getElementById("submitScoreBtn");
+const submitStatus = document.getElementById("submitStatus");
+
+// Prefill with whatever name they used last time
+const savedName = localStorage.getItem("neonDodgeName");
+if (savedName && nameInput) nameInput.value = savedName;
+
+
+async function submitScore() {
+
+    if (!db) {
+        submitStatus.textContent = "Leaderboard isn't set up yet.";
+        submitStatus.className = "error";
+        return;
+    }
+
+    const name = (nameInput.value || "").trim().slice(0, 20);
+
+    if (!name) {
+        submitStatus.textContent = "Enter a name first.";
+        submitStatus.className = "error";
+        return;
+    }
+
+    submitScoreBtn.disabled = true;
+    submitStatus.textContent = "Submitting...";
+    submitStatus.className = "";
+
+    localStorage.setItem("neonDodgeName", name);
+
+    const deviceId = getDeviceId();
+    const docRef = db.collection(LEADERBOARD_COLLECTION).doc(deviceId);
+
+    try {
+
+        const existing = await docRef.get();
+
+        // Only overwrite this device's row if the new run actually beats
+        // their stored best - otherwise leave the leaderboard untouched.
+        if (existing.exists && existing.data().score >= score) {
+            submitStatus.textContent =
+                "Didn't beat your best (" + existing.data().score + ").";
+            submitStatus.className = "";
+            submitScoreBtn.disabled = false;
+            return;
+        }
+
+        await docRef.set({
+            name: name,
+            score: score,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+
+        submitStatus.textContent = "Score submitted!";
+        submitStatus.className = "success";
+
+    } catch (err) {
+        console.error(err);
+        submitStatus.textContent = "Couldn't submit - try again.";
+        submitStatus.className = "error";
+    }
+
+    submitScoreBtn.disabled = false;
+}
+
+if (submitScoreBtn) {
+    submitScoreBtn.addEventListener("click", submitScore);
+}
+
+if (nameInput) {
+    nameInput.addEventListener("keydown", function(event) {
+        // Stop typing (including Space) from reaching the document-level
+        // handlers that move the player or restart the game.
+        event.stopPropagation();
+        if (event.key === "Enter") {
+            submitScore();
+        }
+    });
+}
+
+
+async function loadLeaderboard() {
+
+    const list = document.getElementById("leaderboardList");
+    const empty = document.getElementById("leaderboardEmpty");
+
+    if (!list || !empty) return;
+
+    list.innerHTML = "";
+
+    if (!db) {
+        empty.style.display = "block";
+        empty.textContent = "Leaderboard isn't set up yet.";
+        return;
+    }
+
+    try {
+
+        const snapshot = await db.collection(LEADERBOARD_COLLECTION)
+            .orderBy("score", "desc")
+            .limit(10)
+            .get();
+
+        if (snapshot.empty) {
+            empty.style.display = "block";
+            empty.textContent = "No scores yet - be the first!";
+            return;
+        }
+
+        empty.style.display = "none";
+
+        let rank = 1;
+
+        snapshot.forEach(function(doc) {
+
+            const data = doc.data();
+
+            const li = document.createElement("li");
+
+            const rankSpan = document.createElement("span");
+            rankSpan.className = "lb-rank";
+            rankSpan.textContent = "#" + rank;
+
+            const nameSpan = document.createElement("span");
+            nameSpan.className = "lb-name";
+            nameSpan.textContent = data.name || "???"; // textContent, never innerHTML - names are user input
+
+            const scoreSpan = document.createElement("span");
+            scoreSpan.className = "lb-score";
+            scoreSpan.textContent = data.score;
+
+            li.appendChild(rankSpan);
+            li.appendChild(nameSpan);
+            li.appendChild(scoreSpan);
+
+            list.appendChild(li);
+            rank++;
+        });
+
+    } catch (err) {
+        console.error(err);
+        empty.style.display = "block";
+        empty.textContent = "Couldn't load leaderboard.";
+    }
+}
+
+const leaderboardModal = document.getElementById("leaderboardModal");
+const leaderboardToggle = document.getElementById("leaderboardToggle");
+const leaderboardClose = document.getElementById("leaderboardClose");
+
+if (leaderboardToggle) {
+    leaderboardToggle.addEventListener("click", function() {
+        leaderboardModal.classList.add("visible");
+        loadLeaderboard();
+    });
+}
+
+if (leaderboardClose) {
+    leaderboardClose.addEventListener("click", function() {
+        leaderboardModal.classList.remove("visible");
+    });
+}
+
+if (leaderboardModal) {
+    leaderboardModal.addEventListener("click", function(event) {
+        if (event.target === leaderboardModal) {
+            leaderboardModal.classList.remove("visible");
+        }
+    });
+}
+
+
+// ===============================
 // GAME LOOP
 // ===============================
 // Movement is scaled by deltaFactor so the game runs at the same real-world
@@ -781,7 +1114,7 @@ let lastFrameTime = performance.now();
 
 function gameLoop(currentTime) {
 
-    if (!gameRunning) return;
+    if (!gameRunning || gamePaused) return;
 
     if (currentTime === undefined) {
         currentTime = performance.now();
