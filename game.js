@@ -892,12 +892,12 @@ function togglePause() {
 // shows but every action reports "not set up yet" instead of erroring.
 
 const firebaseConfig = {
-    apiKey: "AIzaSyARo8XyxymS2dUuBepkx5KN7PK_OpYQ7oc",
-    authDomain: "crockycodes-neondodge.firebaseapp.com",
-    projectId: "crockycodes-neondodge",
-    storageBucket: "crockycodes-neondodge.firebasestorage.app",
-    messagingSenderId: "915612532873",
-    appId: "1:915612532873:web:76c0aa4fa50dcbf5bc4658"
+    apiKey: "YOUR_API_KEY",
+    authDomain: "YOUR_PROJECT.firebaseapp.com",
+    projectId: "YOUR_PROJECT_ID",
+    storageBucket: "YOUR_PROJECT.appspot.com",
+    messagingSenderId: "YOUR_SENDER_ID",
+    appId: "YOUR_APP_ID"
 };
 
 let db = null;
@@ -992,6 +992,20 @@ async function submitScore() {
     }
 
     submitScoreBtn.disabled = false;
+}
+
+const scoreSubmitRow = document.getElementById("scoreSubmitRow");
+
+// The game-over overlay restarts the game on any click/tap - stop clicks
+// inside the name box and submit button from bubbling up into that, or
+// clicking the input just instantly restarts and closes it.
+if (scoreSubmitRow) {
+    scoreSubmitRow.addEventListener("click", function(event) {
+        event.stopPropagation();
+    });
+    scoreSubmitRow.addEventListener("touchstart", function(event) {
+        event.stopPropagation();
+    });
 }
 
 if (submitScoreBtn) {
